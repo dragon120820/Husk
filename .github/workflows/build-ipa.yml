@@ -24,6 +24,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The vendored StikJIT.framework was built by Swift 6.4 (Xcode 26.x):
+      # its arm64-apple-ios.private.swiftinterface says so on line 2, and Xcode
+      # 16's Swift 6.0/6.1 rejects that interface outright ("expected '{' in
+      # struct" and dozens more, all inside the interface file). Select the
+      # newest Xcode the image offers.
+      - name: Select Xcode
+        run: |
+          ls /Applications | grep -i '^Xcode' || true
+          for v in 26.3 26.2 26.1.1 26.0.1 16.4; do
+            if [ -d "/Applications/Xcode_${v}.app" ]; then
+              sudo xcode-select -s "/Applications/Xcode_${v}.app/Contents/Developer"
+              break
+            fi
+          done
+          xcodebuild -version
+          xcrun swift --version
+
       # ---------- 工具链 ----------
       - name: Install build tools (Homebrew)
         run: |
