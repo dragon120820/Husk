@@ -19,18 +19,10 @@ PREFIX="$HUSK_ROOT/build/ios-arm64/sysroot"
 LOG="$HUSK_ROOT/build/logs/angle-build.log"
 mkdir -p "$GPU" "$(dirname "$LOG")"
 
-# WebKit's ANGLE is pinned, not taken from main.
-#
-# The 2026-08-12 "Update ANGLE to 2026-07-06" landed a static_assert(kNeedsLock)
-# inside ResourceMap's `if constexpr (kAdditionalFlatResourcesSize > 0)` branch
-# (ResourceMap.h:463). WebKit itself compiles ANGLE in a configuration where
-# that holds; Husk's does not, and the assertion fails the build:
-#
-#   src/libANGLE/ResourceMap.h:463:9: error: static assertion failed due to
-#   requirement 'kNeedsLock'
-#
-# This commit is the last ANGLE refresh before that one and builds clean.
-WEBKIT_COMMIT="${WEBKIT_COMMIT:-6115059613ef}"
+# WebKit is pinned rather than tracked at main, so an upstream ANGLE refresh
+# cannot silently break this build. See the static_assert note further down for
+# the class of breakage this guards against.
+WEBKIT_COMMIT="${WEBKIT_COMMIT:-6115059613eff0e204bf87b7f2531a57e9c545ea}"
 
 if [ ! -d "$WK/.git" ]; then
     echo "==> sparse-cloning WebKit for its ANGLE tree"
@@ -57,6 +49,33 @@ echo "==> WebKit at $(git -C "$WK" rev-parse --short HEAD)"
     Source/ThirdParty/ANGLE Configurations Tools/Scripts Tools/ccache )
 
 cd "$WK/Source/ThirdParty/ANGLE"
+
+# Apple clang evaluates a static_assert inside a discarded `if constexpr` branch.
+#
+# ResourceMap::assignAboveCurrentFlatSize() is:
+#
+#     if constexpr (kAdditionalFlatResourcesSize > 0) {
+#         static_assert(kNeedsLock);
+#         ...
+#
+# WebKit's Xcode build never defines ANGLE_ENABLE_SHARE_CONTEXT_LOCK (it is set
+# only in BUILD.gn, and Chromium's gn is not how WebKit builds ANGLE), so
+# ResourceMap falls to the #else branch: kNeedsLock = false and
+# kAdditionalFlatResourcesSize = 0. The branch is then discarded and the
+# assertion is meant never to be instantiated -- but clang diagnoses it anyway:
+#
+#   src/libANGLE/ResourceMap.h:461:9: error: static assertion failed due to
+#   requirement 'kNeedsLock'
+#
+# (The same construct appears at lines 236 and 238 and compiles, which is why
+# only this one is removed.) The assertion is a development-time reminder, and
+# the branches that reach it are already gated by the `if constexpr`; removing it
+# for this build changes no generated code. Idempotent.
+RMP="src/libANGLE/ResourceMap.h"
+if grep -q 'static_assert(kNeedsLock);' "$RMP"; then
+    echo "==> ANGLE: dropping the discarded-branch static_assert(kNeedsLock)"
+    sed -i '' 's/^\( *\)static_assert(kNeedsLock);/\1\/\/ static_assert(kNeedsLock); \/\/ Apple clang diagnoses this in a discarded if constexpr branch/' "$RMP"
+fi
 
 # Two overrides worth explaining.
 #
