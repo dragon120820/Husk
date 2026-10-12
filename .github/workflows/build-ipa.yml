@@ -70,6 +70,9 @@ jobs:
         run: |
           echo "HUSK_D8=$RUNNER_TEMP/tools-dl/r8.jar" >> "$GITHUB_ENV"
           echo "HUSK_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          # Windows checkouts do not carry the executable bit; make every script
+          # runnable rather than special-casing the call sites.
+          chmod +x scripts/*.sh src/java-framework/build.sh 2>/dev/null || true
 
       # ---------- 依赖源码 ----------
       - name: Fetch sources (QEMU, glib, libffi, ...)
