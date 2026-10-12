@@ -40,13 +40,33 @@ jobs:
           python3 -m pip install --user --break-system-packages pyyaml || \
             python3 -m pip install --user pyyaml || \
             brew install python-yaml || true
-          # R8 (d8) for Husk's Java framework dex
+          # R8 (d8) for Husk's Java framework dex.
+          #
+          # storage.googleapis.com/r8-releases is the usual source but its raw/
+          # path 404s now, and maven.google.com is not reliably reachable from a
+          # runner. Google's Maven artifacts are mirrored by maven.aliyun.com,
+          # which serves the same com.android.tools:r8 jar; try it first, then
+          # the originals as fallback.
           mkdir -p "$RUNNER_TEMP/tools-dl"
-          curl -fL -o "$RUNNER_TEMP/tools-dl/r8.jar" \
-            "https://storage.googleapis.com/r8-releases/raw/main/r8.jar" || \
-            curl -fL -o "$RUNNER_TEMP/tools-dl/r8.jar" \
-            "https://github.com/google/r8/releases/download/8.5.35/r8.jar" || true
-          ls -la "$RUNNER_TEMP/tools-dl/" || true
+          R8_VERSION="8.9.35"
+          r8_urls=(
+            "https://maven.aliyun.com/repository/google/com/android/tools/r8/${R8_VERSION}/r8-${R8_VERSION}.jar"
+            "https://maven.google.com/com/android/tools/r8/${R8_VERSION}/r8-${R8_VERSION}.jar"
+            "https://storage.googleapis.com/r8-releases/raw/main/r8.jar"
+          )
+          for u in "${r8_urls[@]}"; do
+            if curl -fL --retry 3 --connect-timeout 20 -o "$RUNNER_TEMP/tools-dl/r8.jar" "$u"; then
+              echo "r8 from $u"
+              break
+            fi
+          done
+          # The jar has to actually carry D8, not be an error page.
+          if ! unzip -l "$RUNNER_TEMP/tools-dl/r8.jar" 2>/dev/null | grep -q 'com/android/tools/r8/D8.class'; then
+            echo "downloaded r8.jar does not contain D8" >&2
+            ls -la "$RUNNER_TEMP/tools-dl/" >&2
+            exit 1
+          fi
+          ls -la "$RUNNER_TEMP/tools-dl/"
 
       - name: Locate a JDK
         id: jdk
