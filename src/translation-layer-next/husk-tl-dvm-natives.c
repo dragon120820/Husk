@@ -419,6 +419,94 @@ NAT(Native_null) { UNUSED; *ret = L(NULL); return true; }
 NAT(Native_emptyStrings) { UNUSED; *ret = L(string_array(NULL, 0)); return true; }
 NAT(Native_false) { UNUSED; *ret = Z(false); return true; }
 NAT(Native_noop) { UNUSED; return true; }
+
+/* android.system.OsConstantsHolder.initConstants(): in ART this is libjavacore.so's register_android_system_OsConstants, which
+ * fills OsConstants' static int fields with Linux's numbers. On iOS those numbers are Darwin's for some names, so the correct
+ * source is the guest's own bionic <errno.h>/<fcntl.h>/<sys/stat.h> constants, which Husk already mirrors for guest code.
+ * System.<clinit> calls this through Runtime.availableProcessors, so a throw here takes down java.lang.System and with it every
+ * app written in Java. Missing fields are silently skipped: OsConstants' field set moves between releases, and a name this
+ * runtime does not know must not break initialisation. */
+static void osconstants_set_int(const char *name, int v) { jvalue x; memset(&x, 0, sizeof(x)); x.i = v; tl_jni_set_static_field("android/system/OsConstants", name, "I", x); }
+NAT(OsConstantsHolder_initConstants)
+{
+    UNUSED;
+    /* errno values: bionic's for aarch64, which is what Android apps compute with */
+    osconstants_set_int("E2BIG", 7);    osconstants_set_int("EACCES", 13);  osconstants_set_int("EADDRINUSE", 98);
+    osconstants_set_int("EADDRNOTAVAIL", 99); osconstants_set_int("EAFNOSUPPORT", 97); osconstants_set_int("EAGAIN", 11);
+    osconstants_set_int("EALREADY", 114); osconstants_set_int("EBADF", 9);  osconstants_set_int("EBADMSG", 74);
+    osconstants_set_int("EBUSY", 16);   osconstants_set_int("ECANCELED", 125); osconstants_set_int("ECHILD", 10);
+    osconstants_set_int("ECONNABORTED", 103); osconstants_set_int("ECONNREFUSED", 111); osconstants_set_int("ECONNRESET", 104);
+    osconstants_set_int("EDEADLK", 35); osconstants_set_int("EDESTADDRREQ", 89); osconstants_set_int("EDOM", 33);
+    osconstants_set_int("EDQUOT", 122); osconstants_set_int("EEXIST", 17);  osconstants_set_int("EFAULT", 14);
+    osconstants_set_int("EFBIG", 27);   osconstants_set_int("EHOSTUNREACH", 113); osconstants_set_int("EIDRM", 43);
+    osconstants_set_int("EILSEQ", 84);  osconstants_set_int("EINPROGRESS", 115); osconstants_set_int("EINTR", 4);
+    osconstants_set_int("EINVAL", 22);  osconstants_set_int("EIO", 5);     osconstants_set_int("EISCONN", 106);
+    osconstants_set_int("EISDIR", 21);  osconstants_set_int("ELOOP", 40);  osconstants_set_int("EMFILE", 24);
+    osconstants_set_int("EMLINK", 31);  osconstants_set_int("EMSGSIZE", 90); osconstants_set_int("EMULTIHOP", 72);
+    osconstants_set_int("ENAMETOOLONG", 36); osconstants_set_int("ENETDOWN", 100); osconstants_set_int("ENETRESET", 102);
+    osconstants_set_int("ENETUNREACH", 101); osconstants_set_int("ENFILE", 23); osconstants_set_int("ENOBUFS", 105);
+    osconstants_set_int("ENODATA", 61); osconstants_set_int("ENODEV", 19);  osconstants_set_int("ENOENT", 2);
+    osconstants_set_int("ENOEXEC", 8);  osconstants_set_int("ENOLCK", 37);  osconstants_set_int("ENOLINK", 67);
+    osconstants_set_int("ENOMEM", 12);  osconstants_set_int("ENOMSG", 42);  osconstants_set_int("ENOPROTOOPT", 92);
+    osconstants_set_int("ENOSPC", 28);  osconstants_set_int("ENOSR", 63);   osconstants_set_int("ENOSTR", 60);
+    osconstants_set_int("ENOSYS", 38);  osconstants_set_int("ENOTCONN", 107); osconstants_set_int("ENOTDIR", 20);
+    osconstants_set_int("ENOTEMPTY", 39); osconstants_set_int("ENOTSOCK", 88); osconstants_set_int("ENOTSUP", 95);
+    osconstants_set_int("ENOTTY", 25);  osconstants_set_int("ENXIO", 6);    osconstants_set_int("EOPNOTSUPP", 95);
+    osconstants_set_int("EOVERFLOW", 75); osconstants_set_int("EPERM", 1);  osconstants_set_int("EPIPE", 32);
+    osconstants_set_int("EPROTO", 71);  osconstants_set_int("EPROTONOSUPPORT", 93); osconstants_set_int("EPROTOTYPE", 91);
+    osconstants_set_int("ERANGE", 34);  osconstants_set_int("EROFS", 30);   osconstants_set_int("ESPIPE", 29);
+    osconstants_set_int("ESRCH", 3);    osconstants_set_int("ESTALE", 116); osconstants_set_int("ETIME", 62);
+    osconstants_set_int("ETIMEDOUT", 110); osconstants_set_int("ETXTBSY", 26); osconstants_set_int("EWOULDBLOCK", 11);
+    osconstants_set_int("EXDEV", 18);
+    /* open(2) flags */
+    osconstants_set_int("O_ACCMODE", 3); osconstants_set_int("O_APPEND", 1024); osconstants_set_int("O_CLOEXEC", 524288);
+    osconstants_set_int("O_CREAT", 64); osconstants_set_int("O_DIRECTORY", 65536); osconstants_set_int("O_EXCL", 128);
+    osconstants_set_int("O_NOCTTY", 256); osconstants_set_int("O_NOFOLLOW", 131072); osconstants_set_int("O_NONBLOCK", 2048);
+    osconstants_set_int("O_RDONLY", 0); osconstants_set_int("O_RDWR", 2);  osconstants_set_int("O_SYNC", 1052672);
+    osconstants_set_int("O_TRUNC", 512); osconstants_set_int("O_WRONLY", 1);
+    /* fcntl(2) commands */
+    osconstants_set_int("F_DUPFD", 0);  osconstants_set_int("F_GETFD", 1);  osconstants_set_int("F_SETFD", 2);
+    osconstants_set_int("F_GETFL", 3);  osconstants_set_int("F_SETFL", 4);  osconstants_set_int("F_GETLK", 5);
+    osconstants_set_int("F_SETLK", 6);  osconstants_set_int("F_SETLKW", 7); osconstants_set_int("F_GETOWN", 9);
+    osconstants_set_int("F_SETOWN", 8);
+    /* access(2) */
+    osconstants_set_int("F_OK", 0);     osconstants_set_int("R_OK", 4);     osconstants_set_int("W_OK", 2);
+    osconstants_set_int("X_OK", 1);
+    /* stat mode bits */
+    osconstants_set_int("S_IFMT", 61440); osconstants_set_int("S_IFDIR", 16384); osconstants_set_int("S_IFCHR", 8192);
+    osconstants_set_int("S_IFBLK", 24576); osconstants_set_int("S_IFREG", 32768); osconstants_set_int("S_IFIFO", 4096);
+    osconstants_set_int("S_IFLNK", 40960); osconstants_set_int("S_IFSOCK", 49152);
+    osconstants_set_int("S_IRWXU", 448); osconstants_set_int("S_IRUSR", 256); osconstants_set_int("S_IWUSR", 128);
+    osconstants_set_int("S_IXUSR", 64);  osconstants_set_int("S_IRWXG", 56); osconstants_set_int("S_IRGRP", 32);
+    osconstants_set_int("S_IWGRP", 16);  osconstants_set_int("S_IXGRP", 8);  osconstants_set_int("S_IRWXO", 7);
+    osconstants_set_int("S_IROTH", 4);   osconstants_set_int("S_IWOTH", 2);  osconstants_set_int("S_IXOTH", 1);
+    osconstants_set_int("S_ISUID", 2048); osconstants_set_int("S_ISGID", 1024); osconstants_set_int("S_ISVTX", 512);
+    /* lseek(2), renameat(2), etc. */
+    osconstants_set_int("SEEK_CUR", 1);  osconstants_set_int("SEEK_END", 2);  osconstants_set_int("SEEK_SET", 0);
+    /* signals: bionic's numbering, which differs from Darwin's above a point and is what Android apps compare against */
+    osconstants_set_int("SIGHUP", 1);    osconstants_set_int("SIGINT", 2);    osconstants_set_int("SIGQUIT", 3);
+    osconstants_set_int("SIGILL", 4);    osconstants_set_int("SIGTRAP", 5);   osconstants_set_int("SIGABRT", 6);
+    osconstants_set_int("SIGBUS", 7);    osconstants_set_int("SIGFPE", 8);    osconstants_set_int("SIGKILL", 9);
+    osconstants_set_int("SIGUSR1", 10);  osconstants_set_int("SIGSEGV", 11);  osconstants_set_int("SIGUSR2", 12);
+    osconstants_set_int("SIGPIPE", 13);  osconstants_set_int("SIGALRM", 14);  osconstants_set_int("SIGTERM", 15);
+    osconstants_set_int("SIGCHLD", 17);  osconstants_set_int("SIGCONT", 18);  osconstants_set_int("SIGSTOP", 19);
+    osconstants_set_int("SIGTSTP", 20);  osconstants_set_int("SIGTTIN", 21);  osconstants_set_int("SIGTTOU", 22);
+    /* poll(2) */
+    osconstants_set_int("POLLIN", 1);    osconstants_set_int("POLLOUT", 4);   osconstants_set_int("POLLERR", 8);
+    osconstants_set_int("POLLHUP", 16);  osconstants_set_int("POLLNVAL", 32); osconstants_set_int("POLLPRI", 2);
+    /* socket(2) families, protocols: what apps that open sockets compare against */
+    osconstants_set_int("AF_UNIX", 1);   osconstants_set_int("AF_INET", 2);   osconstants_set_int("AF_INET6", 10);
+    osconstants_set_int("AF_NETLINK", 16); osconstants_set_int("AF_UNSPEC", 0);
+    osconstants_set_int("SOCK_STREAM", 1); osconstants_set_int("SOCK_DGRAM", 2); osconstants_set_int("SOCK_RAW", 3);
+    osconstants_set_int("IPPROTO_TCP", 6); osconstants_set_int("IPPROTO_UDP", 17); osconstants_set_int("IPPROTO_IP", 0);
+    /* map protection and msync, which apps that map files read */
+    osconstants_set_int("PROT_NONE", 0); osconstants_set_int("PROT_READ", 1); osconstants_set_int("PROT_WRITE", 2);
+    osconstants_set_int("PROT_EXEC", 4);
+    osconstants_set_int("MAP_SHARED", 1); osconstants_set_int("MAP_PRIVATE", 2); osconstants_set_int("MAP_FIXED", 16);
+    osconstants_set_int("MAP_ANONYMOUS", 32);
+    osconstants_set_int("MS_ASYNC", 1);  osconstants_set_int("MS_INVALIDATE", 2); osconstants_set_int("MS_SYNC", 4);
+    return true;
+}
 NAT(Thread_priorityForNiceness)
 {
     (void)self;
@@ -1889,6 +1977,8 @@ static const entry k_natives[] = {
     { "sun/misc/Version", "getJvmSpecialVersion", "()Ljava/lang/String;", Native_null },
     { "sun/misc/Version", "getJdkSpecialVersion", "()Ljava/lang/String;", Native_null },
     { "sun/nio/fs/LinuxNativeDispatcher", "init", "()V", Native_noop },
+    /* android.system.OsConstants' field set, which System.<clinit> reaches through Runtime.availableProcessors */
+    { "android/system/OsConstantsHolder", "initConstants", "()V", OsConstantsHolder_initConstants },
     { "java/lang/System", "currentTimeMillis", "()J", System_currentTimeMillis },
     { "java/lang/System", "nanoTime", "()J", System_nanoTime },
     { "java/lang/System", "log", "(CLjava/lang/String;Ljava/lang/Throwable;)V", System_log },

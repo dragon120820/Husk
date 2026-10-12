@@ -1,0 +1,132 @@
+name: Build Husk IPA
+
+# 完整从源码构建 Husk.ipa (含我的 OsConstantsHolder 修复)
+# 手动触发,或推送到 main 时触发
+on:
+  workflow_dispatch:
+    inputs:
+      skip_java_runtime:
+        description: '跳过 Java 运行时构建(调试用,绕过 APEX 提取)'
+        required: false
+        default: 'false'
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    # iOS 构建必须用 macOS runner
+    runs-on: macos-14
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------- 工具链 ----------
+      - name: Install build tools (Homebrew)
+        run: |
+          brew install meson ninja pkg-config e2fsprogs gptfdisk qemu
+          # Rust, for the on-device pairing library
+          if ! command -v cargo >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup target add aarch64-apple-ios || true
+          # xcodegen, for regenerating the Xcode project
+          brew install xcodegen
+          # R8 (d8) for Husk's Java framework dex
+          mkdir -p "$RUNNER_TEMP/tools-dl"
+          curl -fL -o "$RUNNER_TEMP/tools-dl/r8.jar" \
+            "https://storage.googleapis.com/r8-releases/raw/main/r8.jar" || \
+            curl -fL -o "$RUNNER_TEMP/tools-dl/r8.jar" \
+            "https://github.com/google/r8/releases/download/8.5.35/r8.jar" || true
+          ls -la "$RUNNER_TEMP/tools-dl/" || true
+
+      - name: Locate a JDK
+        id: jdk
+        run: |
+          # macOS runner 自带多个 JDK, 挑一个
+          for c in \
+            "$(dirname "$(dirname "$(readlink -f "$(command -v javac)" 2>/dev/null)")")" \
+            /Library/Java/JavaVirtualMachines/*/Contents/Home \
+            "$JAVA_HOME" ; do
+            if [ -x "$c/bin/javac" ]; then echo "HUSK_JDK=$c" >> "$GITHUB_ENV"; echo "JDK: $c"; break; fi
+          done
+          javac -version || true
+
+      - name: Set build environment
+        run: |
+          echo "HUSK_D8=$RUNNER_TEMP/tools-dl/r8.jar" >> "$GITHUB_ENV"
+          echo "HUSK_ROOT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
+      # ---------- 依赖源码 ----------
+      - name: Fetch sources (QEMU, glib, libffi, ...)
+        run: ./scripts/fetch_sources.sh
+
+      - name: Build iOS dependencies (libffi glib pixman libucontext libslirp)
+        run: ./scripts/build_ios.sh libffi glib pixman libucontext libslirp
+
+      - name: Fix meson cross file name
+        run: cp build/ios-arm64/cross-darwin.meson build/ios-arm64/cross-ios-darwin.meson
+
+      - name: Build ANGLE (EGL/GLES over Metal)
+        run: ./scripts/build_angle_ios.sh
+
+      - name: Build libepoxy + virglrenderer
+        run: |
+          PKG_CONFIG_LIBDIR="$PWD/build/ios-arm64/sysroot/lib/pkgconfig:$PWD/build/ios-arm64/sysroot/share/pkgconfig" \
+            ./scripts/build_gpu_ios.sh
+
+      - name: Build QEMU
+        run: ./scripts/build_ios.sh qemu
+
+      - name: Integrate Husk sources into QEMU (includes my fix wiring)
+        run: ./scripts/integrate_husk.sh
+
+      - name: Rebuild QEMU (with Husk sources)
+        run: ./scripts/build_ios.sh qemurebuild
+
+      - name: Fetch guest kernel + firmware
+        run: ./scripts/fetch_phase0_guest.sh
+
+      - name: Build MoltenVK (Vulkan over Metal)
+        run: ./scripts/build_moltenvk_ios.sh
+
+      - name: Build on-device pairing (Rust)
+        run: ./scripts/build_rppairing_ios.sh
+
+      # ---------- Lineage 镜像与 Java 运行时 ----------
+      - name: Download Lineage system image
+        if: ${{ github.event.inputs.skip_java_runtime != 'true' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/lineage"
+          curl -fL --retry 3 -o "$RUNNER_TEMP/lineage/vda.qcow2" \
+            "https://github.com/Leviidev/Husk/releases/download/lineage-v2/$(python3 -c "import json,urllib.request;print(json.load(urllib.request.urlopen('https://github.com/Leviidev/Husk/releases/download/lineage-v2/manifest.json'))['image']['file'])")"
+          ls -lh "$RUNNER_TEMP/lineage/"
+
+      - name: Extract Android system resources (fonts, cacerts)
+        if: ${{ github.event.inputs.skip_java_runtime != 'true' }}
+        run: ./scripts/build_android_system.sh "$RUNNER_TEMP/lineage/vda.qcow2"
+
+      - name: Build Java runtime from image (APEX)
+        if: ${{ github.event.inputs.skip_java_runtime != 'true' }}
+        run: ./scripts/build_java_runtime_from_image.sh "$RUNNER_TEMP/lineage/vda.qcow2"
+
+      - name: Build Husk's Java framework dex
+        if: ${{ github.event.inputs.skip_java_runtime != 'true' }}
+        run: ./src/java-framework/build.sh "$PWD/build/java-runtime/husk-framework.dex"
+
+      # ---------- 打包 ----------
+      - name: Package IPA
+        run: ./scripts/package_ipa.sh "$PWD/build/Husk.ipa"
+
+      - name: Show IPA info
+        run: ls -lh "$PWD/build/Husk.ipa"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Husk-ipa
+          path: build/Husk.ipa
+          if-no-files-found: error
+          retention-days: 7
