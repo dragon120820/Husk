@@ -34,6 +34,12 @@ jobs:
           rustup target add aarch64-apple-ios || true
           # xcodegen, for regenerating the Xcode project
           brew install xcodegen
+          # virglrenderer's meson build imports yaml (src/gallium/meson.build).
+          # The runner's Homebrew python is externally managed, so pip needs the
+          # override and --user.
+          python3 -m pip install --user --break-system-packages pyyaml || \
+            python3 -m pip install --user pyyaml || \
+            brew install python-yaml || true
           # R8 (d8) for Husk's Java framework dex
           mkdir -p "$RUNNER_TEMP/tools-dl"
           curl -fL -o "$RUNNER_TEMP/tools-dl/r8.jar" \
@@ -45,14 +51,20 @@ jobs:
       - name: Locate a JDK
         id: jdk
         run: |
-          # macOS runner 自带多个 JDK, 挑一个
-          for c in \
-            "$(dirname "$(dirname "$(readlink -f "$(command -v javac)" 2>/dev/null)")")" \
-            /Library/Java/JavaVirtualMachines/*/Contents/Home \
-            "$JAVA_HOME" ; do
-            if [ -x "$c/bin/javac" ]; then echo "HUSK_JDK=$c" >> "$GITHUB_ENV"; echo "JDK: $c"; break; fi
-          done
-          javac -version || true
+          # /usr/libexec/java_home is the reliable way on macOS; the runner ships
+          # at least one JDK (Temurin 17/21). Fall back to a scan.
+          JH="$(/usr/libexec/java_home 2>/dev/null || true)"
+          if [ -z "$JH" ] || [ ! -x "$JH/bin/javac" ]; then
+            for c in /Library/Java/JavaVirtualMachines/*/Contents/Home "$JAVA_HOME"; do
+              if [ -x "$c/bin/javac" ]; then JH="$c"; break; fi
+            done
+          fi
+          if [ -z "$JH" ] || [ ! -x "$JH/bin/javac" ]; then
+            echo "no JDK found" >&2; exit 1
+          fi
+          echo "HUSK_JDK=$JH" >> "$GITHUB_ENV"
+          echo "JDK: $JH"
+          "$JH/bin/javac" -version
 
       - name: Set build environment
         run: |
