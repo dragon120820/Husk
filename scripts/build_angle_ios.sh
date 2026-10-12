@@ -37,12 +37,18 @@ if [ ! -d "$WK/.git" ]; then
     git clone --filter=blob:none --sparse \
         https://github.com/WebKit/WebKit.git "$WK"
 fi
-git -C "$WK" fetch --depth 1 origin "$WEBKIT_COMMIT" 2>/dev/null || true
-git -C "$WK" checkout -q "$WEBKIT_COMMIT" 2>/dev/null || {
-    echo "==> pinned commit not fetched; falling back to a full fetch"
-    git -C "$WK" fetch origin "$WEBKIT_COMMIT"
-    git -C "$WK" checkout -q "$WEBKIT_COMMIT"
-}
+
+# Check out the pinned commit explicitly, and unconditionally.
+#
+# `fetch <sha>` puts the object in FETCH_HEAD; `checkout <sha>` does NOT resolve
+# it in a blob-filtered clone, and with the error suppressed the tree silently
+# stayed on main -- which is how the first two attempts "passed" the pin and hit
+# the same static_assert at a shifted line number. Always fetch so FETCH_HEAD is
+# the pin, then check that out; do not swallow the error.
+echo "==> fetching pinned WebKit commit $WEBKIT_COMMIT"
+git -C "$WK" fetch --depth 1 origin "$WEBKIT_COMMIT"
+git -C "$WK" checkout -q FETCH_HEAD
+echo "==> WebKit at $(git -C "$WK" rev-parse --short HEAD)"
 
 # Configurations and Tools/ccache are not optional: the ANGLE xcconfigs include
 # ../../../../Tools/ccache/ccache.xcconfig, and the build fails to even start
