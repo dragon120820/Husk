@@ -14,8 +14,10 @@ on:
 
 jobs:
   build:
-    # iOS 构建必须用 macOS runner
-    runs-on: macos-14
+    # The checked-in Husk.xcodeproj is objectVersion 77, which Xcode 15 refuses
+    # ("xcodebuild: error: Unable to read project 'Husk.xcodeproj'") -- macos-14
+    # ships Xcode 15.4. macos-15 ships Xcode 16.4, which reads it.
+    runs-on: macos-15
     timeout-minutes: 350
 
     steps:
