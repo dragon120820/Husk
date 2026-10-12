@@ -68,6 +68,28 @@ echo "==> virglrenderer (render server in thread mode)"
 # on macOS and thread mode everywhere else for exactly this reason.
 ( cd "$GPU/virgl"
   rm -rf _build
+
+  # A label directly before a declaration is not valid C before C23, and clang
+  # here builds virglrenderer as C (the project sets no -std=). In
+  # vrend_renderer.c, vrend_renderer_fill_caps_v2() has:
+  #
+  #     angle_done:
+  #         char *llvmpipe_string = strstr(caps->v2.renderer, "llvmpipe");
+  #
+  # which trips:
+  #
+  #     ../src/vrend/vrend_renderer.c:13026:4: error: expected expression
+  #     ../src/vrend/vrend_renderer.c:13027:8: error: use of undeclared
+  #     identifier 'llvmpipe_string'
+  #
+  # An empty statement after the label makes the declaration reachable and is
+  # valid C. Idempotent.
+  VR="$GPU/virgl/src/vrend/vrend_renderer.c"
+  if grep -q '^angle_done:$' "$VR"; then
+      sed -i '' 's/^angle_done:$/angle_done: ;/' "$VR"
+      echo "    vrend_renderer.c: label statement added for C compatibility"
+  fi
+
   $MESON setup _build --cross-file "$HUSK_ROOT/build/ios-arm64/cross-ios-darwin.meson" \
       --prefix "$PREFIX" --default-library=static \
       -Dtests=false -Dcheck-gl-errors=false -Dvenus=false -Dvulkan-dload=false \
