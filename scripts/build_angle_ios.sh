@@ -19,11 +19,30 @@ PREFIX="$HUSK_ROOT/build/ios-arm64/sysroot"
 LOG="$HUSK_ROOT/build/logs/angle-build.log"
 mkdir -p "$GPU" "$(dirname "$LOG")"
 
-if [ ! -d "$WK" ]; then
+# WebKit's ANGLE is pinned, not taken from main.
+#
+# The 2026-08-12 "Update ANGLE to 2026-07-06" landed a static_assert(kNeedsLock)
+# inside ResourceMap's `if constexpr (kAdditionalFlatResourcesSize > 0)` branch
+# (ResourceMap.h:463). WebKit itself compiles ANGLE in a configuration where
+# that holds; Husk's does not, and the assertion fails the build:
+#
+#   src/libANGLE/ResourceMap.h:463:9: error: static assertion failed due to
+#   requirement 'kNeedsLock'
+#
+# This commit is the last ANGLE refresh before that one and builds clean.
+WEBKIT_COMMIT="${WEBKIT_COMMIT:-6115059613ef}"
+
+if [ ! -d "$WK/.git" ]; then
     echo "==> sparse-cloning WebKit for its ANGLE tree"
-    git clone --depth 1 --filter=blob:none --sparse \
+    git clone --filter=blob:none --sparse \
         https://github.com/WebKit/WebKit.git "$WK"
 fi
+git -C "$WK" fetch --depth 1 origin "$WEBKIT_COMMIT" 2>/dev/null || true
+git -C "$WK" checkout -q "$WEBKIT_COMMIT" 2>/dev/null || {
+    echo "==> pinned commit not fetched; falling back to a full fetch"
+    git -C "$WK" fetch origin "$WEBKIT_COMMIT"
+    git -C "$WK" checkout -q "$WEBKIT_COMMIT"
+}
 
 # Configurations and Tools/ccache are not optional: the ANGLE xcconfigs include
 # ../../../../Tools/ccache/ccache.xcconfig, and the build fails to even start
