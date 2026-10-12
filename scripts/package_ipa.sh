@@ -53,7 +53,21 @@ fi
 # is plainly right there on disk.
 if command -v xcodegen >/dev/null 2>&1; then
     echo "==> regenerating the project from project.yml"
-    (cd "$HUSK_ROOT/src/app" && xcodegen generate --quiet)
+    # Not --quiet: a generation failure must be visible, and the generated
+    # project must be checked before xcodebuild is asked to read it. A run that
+    # reported "regenerating" then "building" and died at xcodebuild with
+    # "Unable to read project 'Husk.xcodeproj'" showed neither the reason nor
+    # whether a project was written at all.
+    if ! (cd "$HUSK_ROOT/src/app" && xcodegen generate); then
+        echo "xcodegen failed" >&2
+        exit 1
+    fi
+    if [ ! -f "$HUSK_ROOT/src/app/Husk.xcodeproj/project.pbxproj" ]; then
+        echo "xcodegen did not write Husk.xcodeproj/project.pbxproj" >&2
+        ls -la "$HUSK_ROOT/src/app" >&2
+        exit 1
+    fi
+    echo "==> project.pbxproj: $(wc -c < "$HUSK_ROOT/src/app/Husk.xcodeproj/project.pbxproj") bytes"
 else
     echo "==> xcodegen not installed; using the checked-in project as-is" >&2
 fi
