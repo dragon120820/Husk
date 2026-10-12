@@ -32,8 +32,14 @@ jobs:
           fi
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           rustup target add aarch64-apple-ios || true
-          # xcodegen, for regenerating the Xcode project
-          brew install xcodegen
+          # xcodegen, for regenerating the Xcode project -- deliberately NOT
+          # installed. package_ipa.sh regenerates it when the binary is present,
+          # and the project xcodegen 2.46 writes is rejected by the runner's
+          # Xcode ("Unable to read project 'Husk.xcodeproj'") even though it
+          # writes a 117 KB project.pbxproj. The checked-in project is the one
+          # the project is actually built from and already lists every source,
+          # including husk-tl-dvm-natives.c, so the else-branch is what we want.
+          # brew install xcodegen
           # virglrenderer's meson build imports yaml (src/gallium/meson.build).
           # The runner's Homebrew python is externally managed, so pip needs the
           # override and --user.
