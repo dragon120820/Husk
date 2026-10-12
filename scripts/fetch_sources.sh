@@ -11,7 +11,12 @@ fetch() {
     local url="$1" file="$DL/$(basename "$1")"
     if [ -s "$file" ]; then echo "[skip] $(basename "$file")"; return 0; fi
     echo "[get ] $(basename "$file")"
-    curl -fL --retry 3 --retry-delay 5 -o "$file.part" "$url" || { echo "[FAIL] $url"; return 1; }
+    # --retry-connrefused makes --retry cover a refused/hung connection too, and a
+    # connect timeout keeps a black-holed host (curl 28) from stalling the build
+    # for 75 s per attempt. Both happened on a CI run against ftp.gnu.org.
+    curl -fL --retry 5 --retry-delay 5 --retry-connrefused \
+         --connect-timeout 20 --max-time 600 \
+         -o "$file.part" "$url" || { echo "[FAIL] $url"; return 1; }
     mv "$file.part" "$file"
 }
 
