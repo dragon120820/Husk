@@ -937,11 +937,18 @@ static void *gl_main(void *arg)
                 jobj *eglcfg = cfgc ? dvm_new_object(cfgc) : NULL;
                 if (eglcfg) dvm_slots(eglcfg);
                 jvalue p2[2] = { L(gl10), L(eglcfg) };
+                /* DIAG: these two are the game's own renderer callbacks (cocos's onSurfaceCreated calls nativeInit,
+                 * which sets the whole engine up). A hang here is otherwise invisible: the log stops right after
+                 * "context is ready" with nothing to say which callback never returned. */
+                tl_log_line("javaapp-diag: onSurfaceCreated enter");
                 tl_jni_call(A.gl_renderer, "onSurfaceCreated", "(Ljavax/microedition/khronos/opengles/GL10;Ljavax/microedition/khronos/egl/EGLConfig;)V", p2);
                 if (tl_jni_pending()) log_pending("onSurfaceCreated");
+                tl_log_line("javaapp-diag: onSurfaceCreated exit");
                 jvalue p3[3] = { L(gl10), I(A.cfg.width), I(A.cfg.height) };
+                tl_log_line("javaapp-diag: onSurfaceChanged enter");
                 tl_jni_call(A.gl_renderer, "onSurfaceChanged", "(Ljavax/microedition/khronos/opengles/GL10;II)V", p3);
                 if (tl_jni_pending()) log_pending("onSurfaceChanged");
+                tl_log_line("javaapp-diag: onSurfaceChanged exit");
                 p1[0] = L(gl10);
             }
         }
