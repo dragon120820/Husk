@@ -165,6 +165,30 @@ for name in os.listdir(os.path.join(work, 'apex')):
         subprocess.run([dbg, '-R', f'rdump /etc {os.path.join(dst, "etc")}', img], capture_output=True)
 EOF
 
+# org.apache.http.legacy.jar: Apache HttpClient, for apps that target API 27 or
+# lower (or ask for it in their manifest). Unlike everything above it is not in
+# an APEX -- it lives under /system/framework -- and build_java_runtime.sh takes
+# it from a path on the build machine instead. Without it the runtime logs
+# "cannot open .../org.apache.http.legacy.jar" and those apps lose their HTTP
+# stack. Pull it from the same image.
+echo "==> extracting org.apache.http.legacy.jar"
+HTTPJAR=""
+for cand in /system/framework/org.apache.http.legacy.jar \
+            /system/framework/org.apache.http.legacy.boot.jar \
+            /apex/com.android.art/org.apache.http.legacy.jar; do
+    "$DEBUGFS" -R "dump $cand $WORK/http-legacy.jar" "$WORK/system.img" >/dev/null 2>&1 || true
+    if [ -s "$WORK/http-legacy.jar" ]; then HTTPJAR="$cand"; break; fi
+done
+if [ -n "$HTTPJAR" ]; then
+    cp "$WORK/http-legacy.jar" "$OUT/org.apache.http.legacy.jar"
+    echo "    from $HTTPJAR ($(wc -c < "$OUT/org.apache.http.legacy.jar") bytes)"
+else
+    # 再扫一遍 framework 目录, 有些版本把它放在别处或加了后缀
+    "$DEBUGFS" -R "ls -l /system/framework" "$WORK/system.img" 2>/dev/null \
+        | grep -i 'http.*legacy' || true
+    echo "    NOT FOUND; apps that need Apache HttpClient will lack it" >&2
+fi
+
 echo "==> result"
 find "$OUT" -type f | head -60
 du -sh "$OUT" || true
