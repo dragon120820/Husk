@@ -908,9 +908,14 @@ static void *gl_main(void *arg)
     jobj *gl10 = NULL;
     jvalue p1[1];
     int64_t next = now_ns();
+    /* DIAG: count frames where onDrawFrame actually ran, and report the loop's decision inputs once a second, so a
+     * "no picture" report can be told apart from "onDrawFrame is never called" (renderer or view missing) and from
+     * "it is called but nothing reaches the screen". */
+    unsigned long diag_ticks = 0, diag_drew = 0, diag_fresh = 0, diag_req = 0, diag_bf = 0;
     while (!atomic_load(&A.ended)) {
         if (atomic_load(&A.paused)) { usleep(20000); next = now_ns(); continue; }
         bool drew = false;
+        diag_ticks++;
         /* the app's renderer, once its GLSurfaceView is on screen */
         if (__atomic_load_n(&A.gl_renderer, __ATOMIC_ACQUIRE) && !app) {
             /* GLSurfaceView's default is OpenGL ES 1 (fixed function, through ANGLE's ES1 front end); 2 and 3 as asked */
@@ -953,15 +958,20 @@ static void *gl_main(void *arg)
             jvalue draw = tl_jni_call(A.gl_view, "huskBeginFrame", "()Z", NULL);
             if (tl_jni_pending()) log_pending("a queued GL event");
             /* a new frame of views needs the scene under it again: what was swapped is gone */
-            if (draw.z || fresh || atomic_exchange(&A.render_requested, false)) {
+            bool req = atomic_exchange(&A.render_requested, false);
+            if (draw.z) diag_bf++;
+            if (req) diag_req++;
+            if (draw.z || fresh || req) {
                 tl_jni_call(A.gl_renderer, "onDrawFrame", "(Ljavax/microedition/khronos/opengles/GL10;)V", p1);
                 if (tl_jni_pending()) log_pending("onDrawFrame");
                 drew = true;
+                diag_drew++;
             }
         }
         uint64_t q = app_frame_seq();
         bool app_fresh = q != app_seq;
         app_seq = q;
+        if (fresh) diag_fresh++;
         if (drew || fresh || app_fresh) {
             makeCurrent(dpy, surf, surf, ui);
             if (!app) { clearColor(0, 0, 0, tl_web_any_visible() && !app_frame_on() ? 0 : 1); clear(0x4000); }     /* web views show through from under the screen */
@@ -969,6 +979,13 @@ static void *gl_main(void *arg)
             if (tl_ui_has_frame()) ov_draw(&ov, A.cfg.width, A.cfg.height);
             swapBuffers(dpy, surf);
             atomic_fetch_add(&A.frames, 1);
+        }
+        /* DIAG: once a second (60 ticks), say what the loop is deciding on. */
+        if (diag_ticks % 60 == 0) {
+            tl_log_line("javaapp-diag: loop=%lu app=%p view=%p renderer=%p beginFrame_true=%lu drew=%lu fresh=%lu req=%lu frames=%lu", 
+                        diag_ticks, (void *)app, (void *)A.gl_view, (void *)__atomic_load_n(&A.gl_renderer, __ATOMIC_ACQUIRE),
+                        diag_bf, diag_drew, diag_fresh, diag_req, (unsigned long)atomic_load(&A.frames));
+            diag_bf = diag_drew = diag_fresh = diag_req = 0;
         }
         next += 1000000000ll / 60;
         int64_t late = now_ns() - next;

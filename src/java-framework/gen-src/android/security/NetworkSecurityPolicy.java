@@ -3,13 +3,20 @@ package android.security;
 
 @SuppressWarnings({"unchecked", "rawtypes", "deprecation"})
 public class NetworkSecurityPolicy {
-    private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+    // Husk: the policy is one per process on Android, and its answer is what the app's manifest asked for. The
+    // generated stub returned false unless something in-process called setCleartextTrafficPermitted, and made a
+    // fresh object for every getInstance(), so that answer never stuck -- every cleartext HTTP request (an old
+    // game's analytics, its login) was refused with "Cleartext traffic not permitted". Default to allowing it:
+    // Husk runs apps whose targetSdk is long before the cleartext default flipped, and a game that cannot reach
+    // its own server does not get far enough to draw.
+    private static final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+    private static final NetworkSecurityPolicy INSTANCE = new NetworkSecurityPolicy();
     public static android.security.net.config.ApplicationConfig getApplicationConfigForPackage(android.content.Context p0, java.lang.String p1) { return null; }
-    public static android.security.NetworkSecurityPolicy getInstance() { return new NetworkSecurityPolicy(); }
+    public static android.security.NetworkSecurityPolicy getInstance() { return INSTANCE; }
     public void handleTrustStorageUpdate() {}
     public boolean isCertificateTransparencyVerificationRequired(java.lang.String p0) { return false; }
-    public boolean isCleartextTrafficPermitted() { return (huskProps.get("CleartextTrafficPermitted") instanceof Boolean ? (Boolean) huskProps.get("CleartextTrafficPermitted") : false); }
-    public boolean isCleartextTrafficPermitted(java.lang.String p0) { return false; }
+    public boolean isCleartextTrafficPermitted() { return (huskProps.get("CleartextTrafficPermitted") instanceof Boolean ? (Boolean) huskProps.get("CleartextTrafficPermitted") : true); }
+    public boolean isCleartextTrafficPermitted(java.lang.String p0) { return isCleartextTrafficPermitted(); }
     public void setCleartextTrafficPermitted(boolean p0) { huskProps.put("CleartextTrafficPermitted", Boolean.valueOf(p0)); }
     protected NetworkSecurityPolicy() {}
 }
