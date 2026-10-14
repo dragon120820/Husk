@@ -416,7 +416,7 @@ bool tl_jni_load_library(const char *base) { return load_native_library(base); }
 static bool load_native_library(const char *base)
 {
     tl_lib *L = tl_ld_load(base);
-    if (!L) return false;
+    if (!L) { tl_log_line("jni: %s: tl_ld_load failed", base); return false; }
     tl_ld_init(L);
     pthread_mutex_lock(&g_onload_mu);
     bool first = true;
@@ -437,7 +437,11 @@ static bool load_native_library(const char *base)
         if (onload) {
             int32_t ver = onload(tl_jni_vm(), NULL);
             tl_log_line("jni: %s JNI_OnLoad -> %#x", base, ver);
+        } else {
+            tl_log_line("jni: %s: no JNI_OnLoad (nothing registered by it)", base);
         }
+    } else {
+        tl_log_line("jni: %s: already loaded", base);
     }
     return true;
 }

@@ -2294,8 +2294,15 @@ bool tl_dvm_load_library(const char *name_or_path)
 bool tl_dvm_load_natives(const char *libdir)
 {
     tl_ld_add_search_dir(libdir);
+    /* Every one of libcore's natives (android.system.OsConstants, libcore.io.Linux and the rest) is registered by
+     * libjavacore.so's JNI_OnLoad, so whether that ran is the difference between a working runtime and
+     * "No implementation found for ...". Report each library's outcome: a silent failure here looks exactly
+     * like a missing native further down. */
     bool ok = tl_jni_load_library("libjavacore.so");
-    ok = tl_jni_load_library("libopenjdk.so") && ok;
+    if (!ok) tl_log_line("dvm: libjavacore.so did not load");
+    bool oj = tl_jni_load_library("libopenjdk.so");
+    if (!oj) tl_log_line("dvm: libopenjdk.so did not load");
+    ok = oj && ok;
     /* core-icu4j's natives (charset converters, ICU's Java side), which ART loads with the runtime */
     if (!tl_jni_load_library("libicu_jni.so")) tl_log_line("dvm: libicu_jni.so did not load");
     if (tl_jni_pending()) { char b[300]; tl_log_line("dvm: loading libcore's natives threw %s", tl_dvm_describe_pending(b, sizeof(b)) ? b : "?"); tl_jni_clear(); }
