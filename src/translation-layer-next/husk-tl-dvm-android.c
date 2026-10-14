@@ -962,10 +962,15 @@ static void *gl_main(void *arg)
             if (draw.z) diag_bf++;
             if (req) diag_req++;
             if (draw.z || fresh || req) {
+                /* DIAG: mark entry and exit, so a hang inside the game's own render is visible as "enter" with no "exit". */
+                if (diag_drew < 3 || diag_drew % 120 == 0)
+                    tl_log_line("javaapp-diag: onDrawFrame enter #%lu", diag_drew + 1);
                 tl_jni_call(A.gl_renderer, "onDrawFrame", "(Ljavax/microedition/khronos/opengles/GL10;)V", p1);
                 if (tl_jni_pending()) log_pending("onDrawFrame");
                 drew = true;
                 diag_drew++;
+                if (diag_drew <= 3 || diag_drew % 120 == 0)
+                    tl_log_line("javaapp-diag: onDrawFrame exit #%lu", diag_drew);
             }
         }
         uint64_t q = app_frame_seq();
@@ -982,7 +987,7 @@ static void *gl_main(void *arg)
         }
         /* DIAG: once a second (60 ticks), say what the loop is deciding on. */
         if (diag_ticks % 60 == 0) {
-            tl_log_line("javaapp-diag: loop=%lu app=%p view=%p renderer=%p beginFrame_true=%lu drew=%lu fresh=%lu req=%lu frames=%lu", 
+            tl_log_line("javaapp-diag: loop=%lu app=%p view=%p renderer=%p beginFrame_true=%lu drew=%lu fresh=%lu req=%lu frames=%lu",
                         diag_ticks, (void *)app, (void *)A.gl_view, (void *)__atomic_load_n(&A.gl_renderer, __ATOMIC_ACQUIRE),
                         diag_bf, diag_drew, diag_fresh, diag_req, (unsigned long)atomic_load(&A.frames));
             diag_bf = diag_drew = diag_fresh = diag_req = 0;
