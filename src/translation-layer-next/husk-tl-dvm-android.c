@@ -21,7 +21,6 @@
 #include <unistd.h>
 #if defined(__APPLE__) && defined(__aarch64__)
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <mach/arm/thread_status.h>
 #if __has_feature(ptrauth_calls)
 #include <ptrauth.h>
@@ -112,9 +111,9 @@ static void *sample_main(void *arg)
             uintptr_t cursor = fp;
             while (depth < 16 && sp >= s->low && sp <= s->high && cursor >= sp &&
                    cursor >= s->low && cursor <= s->high - sizeof(frames[0]) && !(cursor & 15)) {
-                mach_vm_size_t copied = 0;
-                read_error = mach_vm_read_overwrite(mach_task_self(), cursor, sizeof(frames[0]),
-                                                    (mach_vm_address_t)&frames[depth], &copied);
+                vm_size_t copied = 0;
+                read_error = vm_read_overwrite(mach_task_self(), (vm_address_t)cursor, sizeof(frames[0]),
+                                                    (vm_address_t)&frames[depth], &copied);
                 if (read_error != KERN_SUCCESS || copied != sizeof(frames[0])) {
                     if (read_error == KERN_SUCCESS) read_error = KERN_FAILURE;
                     break;
