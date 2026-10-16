@@ -19,6 +19,14 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__APPLE__) && defined(__aarch64__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <mach/arm/thread_status.h>
+#if __has_feature(ptrauth_calls)
+#include <ptrauth.h>
+#endif
+#endif
 
 #include "husk-tl-bionic.h"
 #include "husk-tl-egl.h"
@@ -46,6 +54,130 @@ static struct {
     char **text; int ntext, ctext;              /* typed text waiting for Native.pollText: "t<text>", "d", "e", "h" */
     int insets[5];                              /* left, top, right, bottom, keyboard */
 } A = { .q_lock = PTHREAD_MUTEX_INITIALIZER, .t_lock = PTHREAD_MUTEX_INITIALIZER };
+
+/* 当前诊断构建默认开启；每个回调独立管理采样线程。 */
+#if defined(__APPLE__) && defined(__aarch64__)
+typedef struct {
+    atomic_bool active;
+    pthread_t worker, target;
+    thread_t port;
+    uintptr_t low, high;
+    const char *phase;
+    bool started;
+} javaapp_sample;
+
+static void sample_address(const char *label, uintptr_t address)
+{
+    const char *lib = NULL; const void *base = NULL;
+    const char *sym = tl_ld_symbol_at((const void *)address, &lib, &base);
+    tl_log_line("javaapp-sample: %s=%#lx %s %s+%#lx", label, (unsigned long)address,
+                lib ? lib : "[host/unknown]", sym ? sym : "?",
+                base ? (unsigned long)(address - (uintptr_t)base) : 0ul);
+}
+
+static void *sample_main(void *arg)
+{
+    javaapp_sample *s = arg;
+    if (pthread_equal(pthread_self(), s->target)) {
+        tl_log_line("javaapp-sample: refusing to sample self");
+        return NULL;
+    }
+    struct timespec start, now;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    int count = 0;
+    while (atomic_load(&s->active) && count < 5) {
+        usleep(100000);
+        if (!atomic_load(&s->active)) break;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        double elapsed = (double)(now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) / 1e9;
+        if (elapsed < 5.0 + count * 3.0) continue;
+        /* 暂停前准备所有存储；暂停区仅取寄存器和读取固定帧数组。 */
+        arm_thread_state64_t state = {0};
+        mach_msg_type_number_t nstate = ARM_THREAD_STATE64_COUNT;
+        uint64_t frames[16][2] = {{0}};
+        uintptr_t pc = 0, lr = 0, sp = 0, fp = 0;
+        int depth = 0;
+        kern_return_t read_error = KERN_SUCCESS;
+        kern_return_t kr = thread_suspend(s->port);
+        if (kr != KERN_SUCCESS) {
+            tl_log_line("javaapp-sample: %s thread_suspend failed: %d", s->phase, kr);
+            break;
+        }
+        kr = thread_get_state(s->port, ARM_THREAD_STATE64, (thread_state_t)&state, &nstate);
+        if (kr == KERN_SUCCESS) {
+            pc = arm_thread_state64_get_pc(state);
+            lr = arm_thread_state64_get_lr(state);
+            sp = arm_thread_state64_get_sp(state);
+            fp = arm_thread_state64_get_fp(state);
+            uintptr_t cursor = fp;
+            while (depth < 16 && sp >= s->low && sp <= s->high && cursor >= sp &&
+                   cursor >= s->low && cursor <= s->high - sizeof(frames[0]) && !(cursor & 15)) {
+                mach_vm_size_t copied = 0;
+                read_error = mach_vm_read_overwrite(mach_task_self(), cursor, sizeof(frames[0]),
+                                                    (mach_vm_address_t)&frames[depth], &copied);
+                if (read_error != KERN_SUCCESS || copied != sizeof(frames[0])) {
+                    if (read_error == KERN_SUCCESS) read_error = KERN_FAILURE;
+                    break;
+                }
+                uintptr_t next = frames[depth++][0];
+                if (next <= cursor) break;
+                cursor = next;
+            }
+        }
+        kern_return_t resumed = thread_resume(s->port);
+        /* 必须恢复目标后才能日志和符号化。 */
+        if (resumed != KERN_SUCCESS) {
+            tl_log_line("javaapp-sample: %s thread_resume FAILED: %d", s->phase, resumed);
+            break;
+        }
+        count++;
+        tl_log_line("javaapp-sample: %s #%d elapsed=%.1fs state=%d read=%d depth=%d SP=%#lx FP=%#lx",
+                    s->phase, count, elapsed, kr, read_error, depth, (unsigned long)sp, (unsigned long)fp);
+        if (kr != KERN_SUCCESS) break;
+        sample_address("PC", pc); sample_address("LR", lr);
+        for (int i = 0; i < depth; i++) {
+            /* 栈上返回地址单独去 PAC，寄存器使用 SDK accessor。 */
+            uintptr_t address = (uintptr_t)frames[i][1];
+#if __has_feature(ptrauth_calls)
+            address = (uintptr_t)ptrauth_strip((void *)address, ptrauth_key_return_address);
+#endif
+            sample_address("frame-LR", address);
+        }
+    }
+    return NULL;
+}
+
+static void sample_begin(javaapp_sample *s, const char *phase)
+{
+    memset(s, 0, sizeof(*s));
+    atomic_init(&s->active, true);
+    s->phase = phase; s->target = pthread_self();
+    s->port = mach_thread_self(); /* 持有独立发送权，结束后释放。 */
+    s->high = (uintptr_t)pthread_get_stackaddr_np(s->target);
+    size_t size = pthread_get_stacksize_np(s->target);
+    if (!MACH_PORT_VALID(s->port) || size < 16 || size > s->high) {
+        tl_log_line("javaapp-sample: %s invalid port or stack bounds", phase);
+    } else {
+        s->low = s->high - size;
+        tl_log_line("javaapp-sample: %s GLThread pthread=%p port=%u stack=[%#lx,%#lx)", phase,
+                    (void *)s->target, s->port, (unsigned long)s->low, (unsigned long)s->high);
+        int err = pthread_create(&s->worker, NULL, sample_main, s);
+        s->started = err == 0;
+        if (err) tl_log_line("javaapp-sample: pthread_create failed: %d", err);
+    }
+}
+
+static void sample_end(javaapp_sample *s)
+{
+    atomic_store(&s->active, false);
+    if (s->started) pthread_join(s->worker, NULL);
+    if (MACH_PORT_VALID(s->port)) mach_port_deallocate(mach_task_self(), s->port);
+}
+#else
+typedef struct { int unused; } javaapp_sample;
+static void sample_begin(javaapp_sample *s, const char *phase) { (void)s; (void)phase; }
+static void sample_end(javaapp_sample *s) { (void)s; }
+#endif
 
 static jvalue L(void *p) { jvalue v; v.j = 0; v.l = p; return v; }
 static jvalue I(int32_t i) { jvalue v; v.j = (uint32_t)i; return v; }
@@ -941,12 +1073,18 @@ static void *gl_main(void *arg)
                  * which sets the whole engine up). A hang here is otherwise invisible: the log stops right after
                  * "context is ready" with nothing to say which callback never returned. */
                 tl_log_line("javaapp-diag: onSurfaceCreated enter");
+                javaapp_sample sample_created;
+                sample_begin(&sample_created, "onSurfaceCreated");
                 tl_jni_call(A.gl_renderer, "onSurfaceCreated", "(Ljavax/microedition/khronos/opengles/GL10;Ljavax/microedition/khronos/egl/EGLConfig;)V", p2);
+                sample_end(&sample_created);
                 if (tl_jni_pending()) log_pending("onSurfaceCreated");
                 tl_log_line("javaapp-diag: onSurfaceCreated exit");
                 jvalue p3[3] = { L(gl10), I(A.cfg.width), I(A.cfg.height) };
                 tl_log_line("javaapp-diag: onSurfaceChanged enter");
+                javaapp_sample sample_changed;
+                sample_begin(&sample_changed, "onSurfaceChanged");
                 tl_jni_call(A.gl_renderer, "onSurfaceChanged", "(Ljavax/microedition/khronos/opengles/GL10;II)V", p3);
+                sample_end(&sample_changed);
                 if (tl_jni_pending()) log_pending("onSurfaceChanged");
                 tl_log_line("javaapp-diag: onSurfaceChanged exit");
                 p1[0] = L(gl10);
